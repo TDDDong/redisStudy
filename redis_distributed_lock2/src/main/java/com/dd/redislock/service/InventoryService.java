@@ -5,8 +5,10 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.data.redis.core.StringRedisTemplate;
+import org.springframework.data.redis.core.script.DefaultRedisScript;
 import org.springframework.stereotype.Service;
 
+import java.util.Arrays;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.locks.Lock;
 import java.util.concurrent.locks.ReentrantLock;
@@ -210,7 +212,7 @@ public class InventoryService {
     /**
      * V6.0
      */
-    public String sale() {
+    /*public String sale() {
         String retMessage = "";
         String key = "ddRedisLock";
         String uuidValue = IdUtil.simpleUUID() + ":" + Thread.currentThread().getId();
@@ -245,6 +247,48 @@ public class InventoryService {
             if (stringRedisTemplate.opsForValue().get(key).equalsIgnoreCase(uuidValue)) {
                 stringRedisTemplate.delete(key);
             }
+        }
+        return retMessage + "\t" + "服务端口号：" + port;
+    }*/
+
+    public String sale() {
+        String retMessage = "";
+        String key = "ddRedisLock";
+        String uuidValue = IdUtil.simpleUUID() + ":" + Thread.currentThread().getId();
+
+        // 改进点 加锁和过期时间设置必须在同一行 保证原子性
+        while (!stringRedisTemplate.opsForValue().setIfAbsent(key, uuidValue, 30L, TimeUnit.SECONDS)) {
+            try {
+                TimeUnit.MILLISECONDS.sleep(20);
+            } catch (InterruptedException e) {
+                throw new RuntimeException(e);
+            }
+        }
+
+        //stringRedisTemplate.expire(key, 30L, TimeUnit.SECONDS);
+        // 抢锁成功的请求线程 进行正常的业务逻辑 扣减库存
+        try {
+            //1 查询库存信息
+            String result = stringRedisTemplate.opsForValue().get("inventory001");
+            //2 判断库存是否足够
+            Integer inventoryNumber = result == null ? 0 : Integer.parseInt(result);
+            //3 扣减库存
+            if (inventoryNumber > 0) {
+                stringRedisTemplate.opsForValue().set("inventory001", String.valueOf(--inventoryNumber));
+                retMessage = "成功卖出一个商品，库存剩余: " + inventoryNumber;
+                System.out.println(retMessage);
+            } else {
+                retMessage = "商品卖完了，o(╥﹏╥)o";
+            }
+        }finally {
+            //V6.0 将判断+删除自己的合并为lua脚本保证原子性
+            String luaScript =
+                    "if (redis.call('get',KEYS[1]) == ARGV[1]) then " +
+                            "return redis.call('del',KEYS[1]) " +
+                            "else " +
+                            "return 0 " +
+                            "end";
+            stringRedisTemplate.execute(new DefaultRedisScript<>(luaScript, Boolean.class), Arrays.asList(key), uuidValue);
         }
         return retMessage + "\t" + "服务端口号：" + port;
     }
