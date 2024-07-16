@@ -1,6 +1,7 @@
 package com.dd.redislock.service;
 
 import cn.hutool.core.util.IdUtil;
+import com.dd.redislock.myLock.DistributedLockFactory;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
@@ -20,6 +21,8 @@ public class InventoryService {
     private StringRedisTemplate stringRedisTemplate;
     @Value("${server.port}")
     private String port;
+    @Autowired
+    private DistributedLockFactory distributedLockFactory;
 
     private Lock lock = new ReentrantLock();
 
@@ -251,7 +254,10 @@ public class InventoryService {
         return retMessage + "\t" + "服务端口号：" + port;
     }*/
 
-    public String sale() {
+    /**
+     * V6.0 将判断+删除自己的合并为lua脚本保证原子性
+     */
+    /*public String sale() {
         String retMessage = "";
         String key = "ddRedisLock";
         String uuidValue = IdUtil.simpleUUID() + ":" + Thread.currentThread().getId();
@@ -291,5 +297,46 @@ public class InventoryService {
             stringRedisTemplate.execute(new DefaultRedisScript<>(luaScript, Boolean.class), Arrays.asList(key), uuidValue);
         }
         return retMessage + "\t" + "服务端口号：" + port;
+    }*/
+
+    public String sale()
+    {
+        String retMessage = "";
+        // 采用工厂模式获取对应的锁
+        Lock redisLock = distributedLockFactory.getDistributedLock("redis");
+        redisLock.lock();
+        try
+        {
+            //1 查询库存信息
+            String result = stringRedisTemplate.opsForValue().get("inventory001");
+            //2 判断库存是否足够
+            Integer inventoryNumber = result == null ? 0 : Integer.parseInt(result);
+            //3 扣减库存
+            if(inventoryNumber > 0) {
+                stringRedisTemplate.opsForValue().set("inventory001",String.valueOf(--inventoryNumber));
+                retMessage = "成功卖出一个商品，库存剩余: "+inventoryNumber+"\t";
+                System.out.println(retMessage);
+                testReEnter();
+            }else{
+                retMessage = "商品卖完了，o(╥﹏╥)o";
+            }
+        }catch (Exception e){
+            e.printStackTrace();
+        }finally {
+            redisLock.unlock();
+        }
+        return retMessage+"\t"+"服务端口号："+port;
+    }
+
+    private void testReEnter()
+    {
+        Lock redisLock = distributedLockFactory.getDistributedLock("redis");
+        redisLock.lock();
+        try
+        {
+            System.out.println("==============测试可重入锁===============");
+        }finally {
+            redisLock.unlock();
+        }
     }
 }
