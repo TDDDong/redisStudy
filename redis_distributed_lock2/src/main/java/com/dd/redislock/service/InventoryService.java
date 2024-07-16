@@ -299,7 +299,10 @@ public class InventoryService {
         return retMessage + "\t" + "服务端口号：" + port;
     }*/
 
-    public String sale()
+    /**
+     * V7.0 采用工厂模式+重写锁来实现分布式锁 达到可重入的效果
+     */
+    /*public String sale()
     {
         String retMessage = "";
         // 采用工厂模式获取对应的锁
@@ -317,6 +320,51 @@ public class InventoryService {
                 retMessage = "成功卖出一个商品，库存剩余: "+inventoryNumber+"\t";
                 System.out.println(retMessage);
                 testReEnter();
+            }else{
+                retMessage = "商品卖完了，o(╥﹏╥)o";
+            }
+        }catch (Exception e){
+            e.printStackTrace();
+        }finally {
+            redisLock.unlock();
+        }
+        return retMessage+"\t"+"服务端口号："+port;
+    }
+
+    private void testReEnter()
+    {
+        Lock redisLock = distributedLockFactory.getDistributedLock("redis");
+        redisLock.lock();
+        try
+        {
+            System.out.println("==============测试可重入锁===============");
+        }finally {
+            redisLock.unlock();
+        }
+    }*/
+
+    /**
+     * V8.0  完成自动续期功能
+     */
+    public String sale()
+    {
+        String retMessage = "";
+        // 采用工厂模式获取对应的锁
+        Lock redisLock = distributedLockFactory.getDistributedLock("redis");
+        redisLock.lock();
+        try
+        {
+            //1 查询库存信息
+            String result = stringRedisTemplate.opsForValue().get("inventory001");
+            //2 判断库存是否足够
+            Integer inventoryNumber = result == null ? 0 : Integer.parseInt(result);
+            //3 扣减库存
+            if(inventoryNumber > 0) {
+                stringRedisTemplate.opsForValue().set("inventory001",String.valueOf(--inventoryNumber));
+                retMessage = "成功卖出一个商品，库存剩余: "+inventoryNumber+"\t";
+                System.out.println(retMessage);
+                //暂停几秒钟线程,为了测试自动续期
+                try { TimeUnit.SECONDS.sleep(120); } catch (InterruptedException e) { e.printStackTrace(); }
             }else{
                 retMessage = "商品卖完了，o(╥﹏╥)o";
             }
