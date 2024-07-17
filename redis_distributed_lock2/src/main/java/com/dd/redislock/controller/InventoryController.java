@@ -20,4 +20,11 @@ public class InventoryController
     {
         return inventoryService.sale();
     }
+
+    @ApiOperation("扣减库存saleByRedisson，一次卖一个")
+    @GetMapping(value = "/inventory/saleByRedisson")
+    public String saleByRedisson()
+    {
+        return inventoryService.saleByRedisson();
+    }
 }
